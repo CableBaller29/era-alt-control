@@ -45,15 +45,11 @@ local function placeBounty(setter, target, buyer)
     local bounty = calculateBounty(remaining)
 
     BOUNTY_REMOTE:InvokeServer(target.Name, bounty)
-
-    -- Teleport target to buyer
     target.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
 
     local actualReceived = math.floor(bounty * (1 - TAX_RATE))
-
     if cur + actualReceived >= targetAmount then
         sendWebhook(settings.BuyerUsername, targetAmount)
-        -- Kick all alts when buyer fully paid
         if LocalPlayer.UserId == settings.OwnerUserId then
             for _, uid in ipairs(settings.AltUserIds or {}) do
                 local alt = Players:GetPlayerByUserId(uid)
@@ -61,12 +57,27 @@ local function placeBounty(setter, target, buyer)
             end
         end
     else
-        -- Swap setter & target for next round
         currentSetter, currentTarget = target, setter
     end
 end
 
--- UI setup
+local function waitForAlts()
+    local settings = getgenv().AutofarmSettings
+    while true do
+        local onlineAlts = {}
+        for _, uid in ipairs(settings.AltUserIds or {}) do
+            local alt = Players:GetPlayerByUserId(uid)
+            if alt and alt.Character then
+                table.insert(onlineAlts, alt)
+            end
+        end
+        if #onlineAlts == #settings.AltUserIds then
+            return onlineAlts
+        end
+        task.wait(1)
+    end
+end
+
 local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "AltControlUI"
 local Frame = Instance.new("Frame", ScreenGui)
@@ -142,32 +153,20 @@ end
 
 monitorBuyer()
 
--- Main loop
 task.spawn(function()
+    local onlineAlts = waitForAlts()
+
+    if #onlineAlts >= 2 then
+        currentSetter = onlineAlts[1]
+        currentTarget = onlineAlts[2]
+    end
+
     while task.wait(1) do
         local settings = getgenv().AutofarmSettings
-        local onlineAlts = {}
-        for _, uid in ipairs(settings.AltUserIds or {}) do
-            local alt = Players:GetPlayerByUserId(uid)
-            if alt then table.insert(onlineAlts, alt) end
+        local buyer = Players:FindFirstChild(settings.BuyerUsername)
+        if buyer and currentSetter and currentTarget then
+            placeBounty(currentSetter, currentTarget, buyer)
         end
-
-        if #onlineAlts >= 2 then
-            local buyer = Players:FindFirstChild(settings.BuyerUsername)
-            if buyer then
-                -- Initialize setter & target if not set
-                if not currentSetter or not currentTarget then
-                    currentSetter = onlineAlts[1]
-                    currentTarget = onlineAlts[2]
-                end
-
-                -- Place bounty from setter to target
-                if currentSetter and currentTarget then
-                    placeBounty(currentSetter, currentTarget, buyer)
-                end
-            end
-        end
-
         updateUI()
         monitorBuyer()
     end
