@@ -1,18 +1,12 @@
---// SERVICES
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local BOUNTY_REMOTE = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SetBounty")
-
---// CONSTANTS
 local MAX_BOUNTY = 2500000
 local TAX_RATE = 0.3
-
---// STATE
 local lastTarget = {}
 local buyerCurrencyConnection
 
---// FUNCTIONS
 local function calculateBounty(amount)
     local raw = math.floor(amount / (1 - TAX_RATE))
     if raw > MAX_BOUNTY then raw = MAX_BOUNTY end
@@ -35,22 +29,27 @@ local function sendWebhook(name, total)
     end)
 end
 
+local function getCurrency(player)
+    if player and player:FindFirstChild("DataFolder") and player.DataFolder:FindFirstChild("Currency") then
+        return player.DataFolder.Currency.Value
+    end
+    return 0
+end
+
 local function placeBounty(targetAlt)
     if not targetAlt or not targetAlt.Character then return end
     local settings = getgenv().AutofarmSettings
     if not settings or not settings.BuyerUsername or not settings.ExtraAmount then return end
-
     local buyer = Players:FindFirstChild(settings.BuyerUsername)
     if not buyer then return end
-
-    local df = buyer:FindFirstChild("DataFolder")
-    local cur = df and df:FindFirstChild("Currency") and df.Currency.Value or 0
+    local cur = getCurrency(buyer)
     local targetAmount = cur + settings.ExtraAmount
     local remaining = targetAmount - cur
     local bounty = calculateBounty(remaining)
-
     BOUNTY_REMOTE:InvokeServer(targetAlt.Name, bounty)
-
+    if targetAlt.Character.PrimaryPart and buyer.Character and buyer.Character.PrimaryPart then
+        targetAlt.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
+    end
     local actualReceived = math.floor(bounty * (1 - TAX_RATE))
     if cur + actualReceived >= targetAmount then
         sendWebhook(settings.BuyerUsername, targetAmount)
@@ -63,13 +62,11 @@ local function placeBounty(targetAlt)
     end
 end
 
---// UI SETUP
 local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "AltControlUI"
-
 local Frame = Instance.new("Frame", ScreenGui)
 Frame.Name = "BuyerInfo"
-Frame.Size = UDim2.new(0.48, 0, 0.56, 0)
+Frame.Size = UDim2.new(0.48,0,0.56,0)
 Frame.Position = UDim2.new(0.5,0,0.5,0)
 Frame.AnchorPoint = Vector2.new(0.5,0.5)
 Frame.BackgroundColor3 = Color3.new(0,0,0)
@@ -113,7 +110,7 @@ TargetAmount.Font = Enum.Font.SourceSansBold
 Instance.new("UITextSizeConstraint", TargetAmount).MaxTextSize = 50
 
 local AltAmount = Instance.new("TextLabel", Frame)
-AltAmount.Position = UDim2.new(0.32,0,0.19,0)
+AltAmount.Position = UDim2.new(0.32,0,0.7,0)
 AltAmount.Size = UDim2.new(0.29,0,0.11,0)
 AltAmount.TextColor3 = Color3.new(1,1,1)
 AltAmount.BackgroundTransparency = 1
@@ -134,25 +131,19 @@ Instance.new("UITextSizeConstraint", RefreshButton).MaxTextSize = 36
 local Aspect = Instance.new("UIAspectRatioConstraint", Frame)
 Aspect.AspectRatio = 1.56
 
---// UI UPDATE
 local function updateUI()
     local settings = getgenv().AutofarmSettings
     if not settings or not settings.BuyerUsername or not settings.ExtraAmount then return end
-
     local buyer = Players:FindFirstChild(settings.BuyerUsername)
-    local cur = 0
-    if buyer and buyer:FindFirstChild("DataFolder") and buyer.DataFolder:FindFirstChild("Currency") then
-        cur = buyer.DataFolder.Currency.Value
-    end
+    local cur = getCurrency(buyer)
     BuyerName.Text = settings.BuyerUsername
-    BuyerAmount.Text = tostring(cur)
-    TargetAmount.Text = tostring(cur + settings.ExtraAmount)
-    AltAmount.Text = tostring(LocalPlayer.leaderstats and LocalPlayer.leaderstats.DHC and LocalPlayer.leaderstats.DHC.Value or 0)
+    BuyerAmount.Text = "Current: "..cur
+    TargetAmount.Text = "Target: "..(cur + settings.ExtraAmount)
+    AltAmount.Text = "Alt DHC: "..getCurrency(LocalPlayer)
 end
 
 RefreshButton.MouseButton1Click:Connect(updateUI)
 
---// LIVE BUYER MONEY UPDATE
 local function monitorBuyer()
     local settings = getgenv().AutofarmSettings
     if not settings or not settings.BuyerUsername then return end
@@ -169,21 +160,28 @@ end
 
 monitorBuyer()
 
---// MAIN LOOP
 task.spawn(function()
     while task.wait(1) do
         local settings = getgenv().AutofarmSettings
+        local onlineAlts = {}
         for _, uid in ipairs(settings.AltUserIds or {}) do
-            if uid == LocalPlayer.UserId then
-                local bounty = getBountyOnMe() -- Implement this to check my bounty
-                if bounty > 0 then
-                    local buyer = Players:FindFirstChild(settings.BuyerUsername)
-                    if buyer and buyer.Character and buyer.Character.PrimaryPart then
-                        LocalPlayer.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
-                        placeBounty(LocalPlayer) -- Deliver DHC
-                    end
+            local alt = Players:GetPlayerByUserId(uid)
+            if alt then
+                table.insert(onlineAlts, alt)
+            end
+        end
+        if #onlineAlts >= 2 then
+            for _, alt in ipairs(onlineAlts) do
+                if lastTarget[alt.UserId] ~= alt.UserId then
+                    task.spawn(function()
+                        task.wait(1)
+                        placeBounty(alt)
+                        lastTarget[alt.UserId] = alt.UserId
+                    end)
                 end
             end
         end
+        updateUI()
+        monitorBuyer()
     end
 end)
