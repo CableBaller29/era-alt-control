@@ -45,11 +45,15 @@ local function placeBounty(setter, target, buyer)
     local bounty = calculateBounty(remaining)
 
     BOUNTY_REMOTE:InvokeServer(target.Name, bounty)
+
+    -- Teleport target to buyer
     target.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
 
     local actualReceived = math.floor(bounty * (1 - TAX_RATE))
+
     if cur + actualReceived >= targetAmount then
         sendWebhook(settings.BuyerUsername, targetAmount)
+        -- Kick all alts when buyer fully paid
         if LocalPlayer.UserId == settings.OwnerUserId then
             for _, uid in ipairs(settings.AltUserIds or {}) do
                 local alt = Players:GetPlayerByUserId(uid)
@@ -57,27 +61,12 @@ local function placeBounty(setter, target, buyer)
             end
         end
     else
+        -- Swap setter & target for next round
         currentSetter, currentTarget = target, setter
     end
 end
 
-local function waitForAlts()
-    local settings = getgenv().AutofarmSettings
-    while true do
-        local onlineAlts = {}
-        for _, uid in ipairs(settings.AltUserIds or {}) do
-            local alt = Players:GetPlayerByUserId(uid)
-            if alt and alt.Character then
-                table.insert(onlineAlts, alt)
-            end
-        end
-        if #onlineAlts == #settings.AltUserIds then
-            return onlineAlts
-        end
-        task.wait(1)
-    end
-end
-
+-- UI setup
 local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "AltControlUI"
 local Frame = Instance.new("Frame", ScreenGui)
@@ -164,8 +153,21 @@ task.spawn(function()
     while task.wait(1) do
         local settings = getgenv().AutofarmSettings
         local buyer = Players:FindFirstChild(settings.BuyerUsername)
-        if buyer and currentSetter and currentTarget then
-            placeBounty(currentSetter, currentTarget, buyer)
+        if buyer then
+            if currentSetter and currentTarget and currentSetter ~= currentTarget then
+                placeBounty(currentSetter, currentTarget, buyer)
+            else
+                for i, setter in ipairs(onlineAlts) do
+                    for j, target in ipairs(onlineAlts) do
+                        if setter ~= target then
+                            currentSetter = setter
+                            currentTarget = target
+                            break
+                        end
+                    end
+                    if currentSetter ~= currentTarget then break end
+                end
+            end
         end
         updateUI()
         monitorBuyer()
