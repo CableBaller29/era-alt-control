@@ -4,8 +4,8 @@ local LocalPlayer = Players.LocalPlayer
 local BOUNTY_REMOTE = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("SetBounty")
 local MAX_BOUNTY = 2500000
 local TAX_RATE = 0.3
-local lastTarget = {}
 local buyerCurrencyConnection
+local currentSetter, currentTarget
 
 local function calculateBounty(amount)
     local raw = math.floor(amount / (1 - TAX_RATE))
@@ -36,32 +36,37 @@ local function getCurrency(player)
     return 0
 end
 
-local function placeBounty(targetAlt)
-    if not targetAlt or not targetAlt.Character then return end
+local function placeBounty(setter, target, buyer)
+    if not setter or not setter.Character or not target or not target.Character or not buyer or not buyer.Character then return end
     local settings = getgenv().AutofarmSettings
-    if not settings or not settings.BuyerUsername or not settings.ExtraAmount then return end
-    local buyer = Players:FindFirstChild(settings.BuyerUsername)
-    if not buyer then return end
     local cur = getCurrency(buyer)
     local targetAmount = cur + settings.ExtraAmount
     local remaining = targetAmount - cur
     local bounty = calculateBounty(remaining)
-    BOUNTY_REMOTE:InvokeServer(targetAlt.Name, bounty)
-    if targetAlt.Character.PrimaryPart and buyer.Character and buyer.Character.PrimaryPart then
-        targetAlt.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
-    end
+
+    BOUNTY_REMOTE:InvokeServer(target.Name, bounty)
+
+    -- Teleport target to buyer
+    target.Character:SetPrimaryPartCFrame(buyer.Character.PrimaryPart.CFrame + Vector3.new(0,5,0))
+
     local actualReceived = math.floor(bounty * (1 - TAX_RATE))
+
     if cur + actualReceived >= targetAmount then
         sendWebhook(settings.BuyerUsername, targetAmount)
+        -- Kick all alts when buyer fully paid
         if LocalPlayer.UserId == settings.OwnerUserId then
             for _, uid in ipairs(settings.AltUserIds or {}) do
                 local alt = Players:GetPlayerByUserId(uid)
                 if alt then alt:Kick("Order completed") end
             end
         end
+    else
+        -- Swap setter & target for next round
+        currentSetter, currentTarget = target, setter
     end
 end
 
+-- UI setup
 local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "AltControlUI"
 local Frame = Instance.new("Frame", ScreenGui)
@@ -71,6 +76,18 @@ Frame.Position = UDim2.new(0.5,0,0.5,0)
 Frame.AnchorPoint = Vector2.new(0.5,0.5)
 Frame.BackgroundColor3 = Color3.new(0,0,0)
 Frame.BorderSizePixel = 0
+
+local function createLabel(parent, pos)
+    local label = Instance.new("TextLabel", parent)
+    label.Position = pos
+    label.Size = UDim2.new(0.29,0,0.11,0)
+    label.TextColor3 = Color3.new(1,1,1)
+    label.BackgroundTransparency = 1
+    label.TextScaled = true
+    label.Font = Enum.Font.SourceSansBold
+    Instance.new("UITextSizeConstraint", label).MaxTextSize = 50
+    return label
+end
 
 local Title = Instance.new("TextLabel", Frame)
 Title.Size = UDim2.new(0.43,0,0.11,0)
@@ -82,41 +99,10 @@ Title.TextScaled = true
 Title.Font = Enum.Font.SourceSansBold
 Instance.new("UITextSizeConstraint", Title).MaxTextSize = 50
 
-local BuyerName = Instance.new("TextLabel", Frame)
-BuyerName.Position = UDim2.new(0.186,0,0.389,0)
-BuyerName.Size = UDim2.new(0.29,0,0.11,0)
-BuyerName.TextColor3 = Color3.new(1,1,1)
-BuyerName.BackgroundTransparency = 1
-BuyerName.TextScaled = true
-BuyerName.Font = Enum.Font.SourceSansBold
-Instance.new("UITextSizeConstraint", BuyerName).MaxTextSize = 50
-
-local BuyerAmount = Instance.new("TextLabel", Frame)
-BuyerAmount.Position = UDim2.new(0.32,0,0.5,0)
-BuyerAmount.Size = UDim2.new(0.29,0,0.11,0)
-BuyerAmount.TextColor3 = Color3.new(1,1,1)
-BuyerAmount.BackgroundTransparency = 1
-BuyerAmount.TextScaled = true
-BuyerAmount.Font = Enum.Font.SourceSansBold
-Instance.new("UITextSizeConstraint", BuyerAmount).MaxTextSize = 50
-
-local TargetAmount = Instance.new("TextLabel", Frame)
-TargetAmount.Position = UDim2.new(0.32,0,0.19,0)
-TargetAmount.Size = UDim2.new(0.29,0,0.11,0)
-TargetAmount.TextColor3 = Color3.new(1,1,1)
-TargetAmount.BackgroundTransparency = 1
-TargetAmount.TextScaled = true
-TargetAmount.Font = Enum.Font.SourceSansBold
-Instance.new("UITextSizeConstraint", TargetAmount).MaxTextSize = 50
-
-local AltAmount = Instance.new("TextLabel", Frame)
-AltAmount.Position = UDim2.new(0.32,0,0.7,0)
-AltAmount.Size = UDim2.new(0.29,0,0.11,0)
-AltAmount.TextColor3 = Color3.new(1,1,1)
-AltAmount.BackgroundTransparency = 1
-AltAmount.TextScaled = true
-AltAmount.Font = Enum.Font.SourceSansBold
-Instance.new("UITextSizeConstraint", AltAmount).MaxTextSize = 50
+local BuyerName = createLabel(Frame, UDim2.new(0.186,0,0.389,0))
+local BuyerAmount = createLabel(Frame, UDim2.new(0.32,0,0.5,0))
+local TargetAmount = createLabel(Frame, UDim2.new(0.32,0,0.19,0))
+local AltAmount = createLabel(Frame, UDim2.new(0.32,0,0.7,0))
 
 local RefreshButton = Instance.new("TextButton", Frame)
 RefreshButton.Position = UDim2.new(0.644,0,0.833,0)
@@ -135,10 +121,10 @@ local function updateUI()
     local settings = getgenv().AutofarmSettings
     if not settings or not settings.BuyerUsername or not settings.ExtraAmount then return end
     local buyer = Players:FindFirstChild(settings.BuyerUsername)
-    local cur = getCurrency(buyer)
+    if not buyer then return end
     BuyerName.Text = settings.BuyerUsername
-    BuyerAmount.Text = "Current: "..cur
-    TargetAmount.Text = "Target: "..(cur + settings.ExtraAmount)
+    BuyerAmount.Text = "Current: "..getCurrency(buyer)
+    TargetAmount.Text = "Target: "..(getCurrency(buyer) + settings.ExtraAmount)
     AltAmount.Text = "Alt DHC: "..getCurrency(LocalPlayer)
 end
 
@@ -149,38 +135,39 @@ local function monitorBuyer()
     if not settings or not settings.BuyerUsername then return end
     local buyer = Players:FindFirstChild(settings.BuyerUsername)
     if buyer and buyer:FindFirstChild("DataFolder") and buyer.DataFolder:FindFirstChild("Currency") then
-        if buyerCurrencyConnection then
-            buyerCurrencyConnection:Disconnect()
-        end
-        buyerCurrencyConnection = buyer.DataFolder.Currency:GetPropertyChangedSignal("Value"):Connect(function()
-            updateUI()
-        end)
+        if buyerCurrencyConnection then buyerCurrencyConnection:Disconnect() end
+        buyerCurrencyConnection = buyer.DataFolder.Currency:GetPropertyChangedSignal("Value"):Connect(updateUI)
     end
 end
 
 monitorBuyer()
 
+-- Main loop
 task.spawn(function()
     while task.wait(1) do
         local settings = getgenv().AutofarmSettings
         local onlineAlts = {}
         for _, uid in ipairs(settings.AltUserIds or {}) do
             local alt = Players:GetPlayerByUserId(uid)
-            if alt then
-                table.insert(onlineAlts, alt)
-            end
+            if alt then table.insert(onlineAlts, alt) end
         end
+
         if #onlineAlts >= 2 then
-            for _, alt in ipairs(onlineAlts) do
-                if lastTarget[alt.UserId] ~= alt.UserId then
-                    task.spawn(function()
-                        task.wait(1)
-                        placeBounty(alt)
-                        lastTarget[alt.UserId] = alt.UserId
-                    end)
+            local buyer = Players:FindFirstChild(settings.BuyerUsername)
+            if buyer then
+                -- Initialize setter & target if not set
+                if not currentSetter or not currentTarget then
+                    currentSetter = onlineAlts[1]
+                    currentTarget = onlineAlts[2]
+                end
+
+                -- Place bounty from setter to target
+                if currentSetter and currentTarget then
+                    placeBounty(currentSetter, currentTarget, buyer)
                 end
             end
         end
+
         updateUI()
         monitorBuyer()
     end
