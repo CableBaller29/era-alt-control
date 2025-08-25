@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local setups = {
@@ -234,3 +235,7 @@ Players.PlayerAdded:Connect(function(plr)
         handleChat(plr, msg)
     end)
 end)
+
+for i, v in pairs(getconnections(LocalPlayer.Idled)) do
+    v:Disable()
+end
