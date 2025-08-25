@@ -115,19 +115,11 @@ end
 local function startDropping(totalAmount)
     totalAmount = parseAmount(totalAmount)
     dropLoop = true
-
-    spawn(function()
+    dropTask = spawn(function()
         while dropLoop and totalAmount > 0 do
-            for _, userId in ipairs(getgenv().alts) do
-                local alt = Players:GetPlayerByUserId(userId)
-                if alt then
-                    local dropAmount = math.min(15000, totalAmount)
-                    ReplicatedStorage:WaitForChild("MainEvent"):FireServer("DropMoney", tostring(dropAmount))
-                    totalAmount = totalAmount - dropAmount
-                end
-            end
-
-            if totalAmount <= 0 then break end
+            local dropAmount = math.min(15000, totalAmount)
+            ReplicatedStorage:WaitForChild("MainEvent"):FireServer("DropMoney", tostring(dropAmount))
+            totalAmount = totalAmount - dropAmount
             task.wait(15)
         end
     end)
