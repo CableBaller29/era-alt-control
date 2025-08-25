@@ -86,7 +86,7 @@ local setups = {
 local dropLoop = false
 local dropTask
 local remaining = 0
-local ChatEvent = ReplicatedStorage:WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest")
+-- local ChatEvent = ReplicatedStorage:WaitForChild("DefaultChatSystemChatEvents"):WaitForChild("SayMessageRequest")
 
 local function teleportPlayer(player, position)
     local char = player.Character
@@ -201,21 +201,6 @@ local function handleChat(plr, msg)
                 end
             end
         end
-    elseif msg:sub(1,7) == ".remain" then
-        for _, userId in ipairs(getgenv().alts) do
-            local alt = Players:GetPlayerByUserId(userId)
-            if alt then
-                ChatEvent:FireServer("[Alt: " .. alt.Name .. "] Remaining: " .. tostring(remaining), "All")
-            end
-        end
-    elseif msg:sub(1,5) == ".say " then
-        local sayMessage = msg:sub(6)
-        for _, userId in ipairs(getgenv().alts) do
-            local alt = Players:GetPlayerByUserId(userId)
-            if alt then
-                ChatEvent:FireServer(sayMessage, "All")
-            end
-        end
     elseif msg:sub(1,8) == ".setfps " then
         local fpsAmount = tonumber(msg:sub(9))
         if fpsAmount then
@@ -224,17 +209,17 @@ local function handleChat(plr, msg)
     end
 end
 
-for _, plr in ipairs(Players:GetPlayers()) do
-    plr.Chatted:Connect(function(msg)
-        handleChat(plr, msg)
-    end)
-end
-
 Players.PlayerAdded:Connect(function(plr)
     plr.Chatted:Connect(function(msg)
         handleChat(plr, msg)
     end)
 end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    plr.Chatted:Connect(function(msg)
+        handleChat(plr, msg)
+    end)
+end
 
 for i, v in pairs(getconnections(LocalPlayer.Idled)) do
     v:Disable()
